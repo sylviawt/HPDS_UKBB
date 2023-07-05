@@ -28,6 +28,6 @@ This work will be presented at Nutrition 2023 with an abstract published.
     Andrius Masedunskas, Luisa Bernardinelli, Luigi Fontana. R scripts for manuscript entitled 
     "Adherence to a plant-based heart-protective diet reduces cardiovascular disease incidence 
     and mortality in the UK Biobank study". Zenodo. 2023. 
-    DOI: 
+    DOI: 10.5281/zenodo.8115595
     
-
+[![DOI](https://zenodo.org/badge/660491051.svg)](https://zenodo.org/badge/latestdoi/660491051)
