@@ -9,6 +9,19 @@ disease incidence and mortality in the UK Biobank study".
 
 This work will be presented at Nutrition 2023 with an abstract published.
 
+## Description of Folder Contents
+
+-   **Heart-protective Diet Score**: R script of Heart-protective Diet Score of conference
+    abstract and manuscript: Tian Wang, Andrea Nova, Sophie Cassidy, Teresa Fazia, Sayan Mitra,
+    Cynthia M Kroeger, Andrius Masedunskas, Luisa Bernardinelli, Luigi Fontana. Adherence
+    to a plant-based heart-protective diet reduces cardiovascular disease incidence 
+    and mortality in the UK Biobank study.
+-   **CVD covariates and outcomes**: R script of CVD covariates and outcomes of conference
+    abstract and manuscript: Tian Wang, Andrea Nova, Sophie Cassidy, Teresa Fazia, Sayan Mitra,
+    Cynthia M Kroeger, Andrius Masedunskas, Luisa Bernardinelli, Luigi Fontana. Adherence
+    to a plant-based heart-protective diet reduces cardiovascular disease incidence 
+    and mortality in the UK Biobank study.
+
 ## Recommendations for Citation of Supporting Materials
 
     Tian Wang, Andrea Nova, Sophie Cassidy, Teresa Fazia, Sayan Mitra, Cynthia M Kroeger, 
