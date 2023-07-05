@@ -1,0 +1,675 @@
+#####################
+# Code for manuscript entitled "Adherence to a plant-based heart-protective diet reduces 
+# cardiovascular disease incidence and mortality in the UK Biobank study"
+#
+# Author: 
+# 
+# Andrea Nova, Tian Wang
+# andrea.nova01@universitadipavia.it
+#####################
+
+#Load Data
+
+setwd("your path")
+library(dplyr)
+library(data.table)
+library(doParallel)
+
+data<-read.table("data", sep='\t', header=TRUE)
+colnames(data)[1]<-"eid"
+
+#####COVARIATES
+
+####31 Sex
+colnames(data)[which(colnames(data)=="X31.0.0")]<-"Sex"
+
+####21001	Body mass index (BMI)	
+colnames(data)[which(colnames(data)=="X21001.0.0")]<-"BMI"
+
+####6153	Medication for cholesterol, blood pressure, diabetes, or take exogenous hormones	
+colnames(data)[which(colnames(data)=="X6153.0.0")]<-"MedicationW"
+
+####6177	Medication for cholesterol, blood pressure or diabetes
+colnames(data)[which(colnames(data)=="X6177.0.0")]<-"MedicationM"
+data$Medication<-data$MedicationW
+data$Medication[which(is.na(data$MedicationW))]<-data$MedicationM[which(is.na(data$MedicationW))]
+data$Medication[which(data$Medication %in% c(-1,-3))]<-NA
+
+####738 Average total household income before tax
+colnames(data)[which(colnames(data)=="X738.0.0")]<-"houseincome"
+data$houseincome[which(data$houseincome %in% c(-1,-3))]<-NA
+data$houseincome<-as.factor(data$houseincome)
+
+####845	Age completed full time education
+colnames(data)[which(colnames(data)=="X845.0.0")]<-"ageeducation"
+data$ageeducation[which(data$ageeducation %in% c(-1,-3))]<-NA
+
+####21000	Ethnicity
+colnames(data)[which(colnames(data)=="X21000.0.0")]<-"Ethnicity1"
+colnames(data)[which(colnames(data)=="X21000.1.0")]<-"Ethnicity2"
+colnames(data)[which(colnames(data)=="X21000.2.0")]<-"Ethnicity3"
+
+data<-mutate(data,Ethnicity1 = ifelse(Ethnicity1 %in% c(-3,-1,NA),NA,Ethnicity1))
+data<-mutate(data,Ethnicity1 = ifelse(Ethnicity1 %in% c(1,1001,1002,1003),1,
+                                      ifelse(Ethnicity1 %in% c(2,2001,2002,2003,2004),0,
+                                             ifelse(Ethnicity1 %in% c(3,3001,3002,3003,3004),0,
+                                                    ifelse(Ethnicity1 %in% c(4,4001,4002,4003),0,NA)))))
+
+data<-mutate(data,Ethnicity2 = ifelse(Ethnicity2 %in% c(-3,-1,NA),NA,Ethnicity2))
+data<-mutate(data,Ethnicity2 = ifelse(Ethnicity2 %in% c(1,1001,1002,1003),1,
+                                      ifelse(Ethnicity2 %in% c(2,2001,2002,2003,2004),0,
+                                             ifelse(Ethnicity2 %in% c(3,3001,3002,3003,3004),0,
+                                                    ifelse(Ethnicity2 %in% c(4,4001,4002,4003),0,NA)))))
+
+data<-mutate(data,Ethnicity3 = ifelse(Ethnicity3 %in% c(-3,-1,NA),NA,Ethnicity3))
+data<-mutate(data,Ethnicity3 = ifelse(Ethnicity3 %in% c(1,1001,1002,1003),1,
+                                      ifelse(Ethnicity3 %in% c(2,2001,2002,2003,2004),0,
+                                             ifelse(Ethnicity3 %in% c(3,3001,3002,3003,3004),0,
+                                                    ifelse(Ethnicity3 %in% c(4,4001,4002,4003),0,NA)))))
+data$Ethnicity<-NULL
+data$Ethnicity<-ifelse(!is.na(data$Ethnicity3), data$Ethnicity3,
+                       ifelse(!is.na(data$Ethnicity2), data$Ethnicity2,
+                              ifelse(!is.na(data$Ethnicity1), data$Ethnicity1,NA)))
+table(data$Ethnicity, useNA="always")
+
+###6138	Qualifications
+colnames(data)[which(colnames(data)=="X6138.0.0")]<-"Degree"
+data$Degree[which(data$Degree == -3)]<-NA
+data$Degree[which(data$Degree !=1 & !is.na(data$Degree))]<-0
+
+####189 Townsend deprivation index at recruitment
+colnames(data)[which(colnames(data)=="X189.0.0")]<-"Townsend"
+
+####6155 Vitamin and mineral supplements
+colnames(data)[which(colnames(data)=="X6155.0.0")]<-"VitaminSupplements"
+data$VitaminSupplements[which(data$VitaminSupplements == -3)]<-NA
+data$VitaminSupplements[which(data$VitaminSupplements == -7)]<-0
+data$VitaminSupplements[which(data$VitaminSupplements >0)]<-1
+
+####6179 Mineral and other dietary supplements
+colnames(data)[which(colnames(data)=="X6179.0.0")]<-"MineralSupplements"
+data$MineralSupplements[which(data$MineralSupplements == -3)]<-NA
+data$MineralSupplements[which(data$MineralSupplements == -7)]<-0
+data$MineralSupplements[which(data$MineralSupplements >0)]<-1
+
+####20084 Vitamin and/or mineral supplement use	
+colnames(data)[which(colnames(data)=="X20084.0.0")]<-"VitaminOtherSupplements"
+
+data$dietary_suppl<-NULL
+data$dietary_suppl<-ifelse(data$VitaminSupplements==1 | data$MineralSupplements==1 | !is.na(data$VitaminOtherSupplements),1,
+                           ifelse(data$VitaminSupplements==0 & data$MineralSupplements==0,0,NA))
+
+#4080	Systolic blood pressure, automated reading
+colnames(data)[which(colnames(data)=="X4080.0.0")]<-"SBP1"
+colnames(data)[which(colnames(data)=="X4080.0.1")]<-"SBP2"
+
+data$SBP<-ifelse(!is.na(data$SBP1) & !is.na(data$SBP2),(data$SBP1+data$SBP2)/2,
+                 ifelse(!is.na(data$SBP1) & is.na(data$SBP2),data$SBP1,
+                        ifelse(is.na(data$SBP1) & !is.na(data$SBP2),data$SBP2,NA)))
+
+
+#4079	Diastolic blood pressure, automated reading	Blood pressure  
+colnames(data)[which(colnames(data)=="X4079.0.0")]<-"DBP1"
+colnames(data)[which(colnames(data)=="X4079.0.1")]<-"DBP2"
+
+data$DBP<-ifelse(!is.na(data$DBP1) & !is.na(data$DBP2),(data$DBP1+data$DBP2)/2,
+                 ifelse(!is.na(data$DBP1) & is.na(data$DBP2),data$DBP1,
+                        ifelse(is.na(data$DBP1) & !is.na(data$DBP2),data$DBP2,NA)))
+
+####30690 Cholesterol
+data$Cholesterol<-ifelse(!is.na(data$X30690.0.0),data$X30690.0.0,
+                         ifelse(!is.na(data$X30690.1.0),data$X30690.1.0,NA))
+
+####30870 Triglycerides
+data$Triglycerides<-ifelse(!is.na(data$X30870.0.0),data$X30870.0.0,
+                           ifelse(!is.na(data$X30870.1.0),data$X30870.1.0,NA))
+
+####30750 Glycated haemoglobin (HbA1c)
+data$HbA1c<-ifelse(!is.na(data$X30750.0.0),data$X30750.0.0,
+                   ifelse(!is.na(data$X30750.1.0),data$X30750.1.0,NA))
+
+####30780 LDL direct
+data$LDL<-ifelse(!is.na(data$X30780.0.0),data$X30780.0.0,
+                 ifelse(!is.na(data$X30780.1.0),data$X30780.1.0,NA))
+
+####30760 HDL cholesterol
+data$HDL<-ifelse(!is.na(data$X30760.0.0),data$X30760.0.0,
+                 ifelse(!is.na(data$X30760.1.0),data$X30760.1.0,NA))
+
+####Cholesterol/HDL ratio
+data$tchdl<-data$Cholesterol/data$HDL
+
+####26002	Energy
+data$Energy<-ifelse(!is.na(data$X26002.0.0),data$X26002.0.0,
+                    ifelse(!is.na(data$X26002.1.0),data$X26002.1.0,
+                           ifelse(!is.na(data$X26002.2.0),data$X26002.2.0,
+                                  ifelse(!is.na(data$X26002.3.0),data$X26002.3.0,data$X26002.4.0))))
+data$Energy<-data$Energy/4.1868
+
+####26005	Protein
+data$Protein<-ifelse(!is.na(data$X26005.0.0),data$X26005.0.0,
+                     ifelse(!is.na(data$X26005.1.0),data$X26005.1.0,
+                            ifelse(!is.na(data$X26005.2.0),data$X26005.2.0,
+                                   ifelse(!is.na(data$X26005.3.0),data$X26005.3.0,data$X26005.4.0))))
+
+####26008	Fat
+data$Fat<-ifelse(!is.na(data$X26008.0.0),data$X26008.0.0,
+                 ifelse(!is.na(data$X26008.1.0),data$X26008.1.0,
+                        ifelse(!is.na(data$X26008.2.0),data$X26008.2.0,
+                               ifelse(!is.na(data$X26008.3.0),data$X26008.3.0,data$X26008.4.0))))
+
+####26014	Saturated fatty acids
+data$SaturatedFat<-ifelse(!is.na(data$X26014.0.0),data$X26014.0.0,
+                          ifelse(!is.na(data$X26014.1.0),data$X26014.1.0,
+                                 ifelse(!is.na(data$X26014.2.0),data$X26014.2.0,
+                                        ifelse(!is.na(data$X26014.3.0),data$X26014.3.0,data$X26014.4.0))))
+
+####26032	Monounsaturated fatty acids
+data$MonoSaturatedFat<-ifelse(!is.na(data$X26032.0.0),data$X26032.0.0,
+                              ifelse(!is.na(data$X26032.1.0),data$X26032.1.0,
+                                     ifelse(!is.na(data$X26032.2.0),data$X26032.2.0,
+                                            ifelse(!is.na(data$X26032.3.0),data$X26032.3.0,data$X26032.4.0))))
+
+####26032	Polyunsaturated fatty acids
+data$PolySaturatedFat<-data$SaturatedFat-data$MonoSaturatedFat
+
+####26013	Carbohydrate
+data$Carbohydrate<-ifelse(!is.na(data$X26013.0.0),data$X26013.0.0,
+                          ifelse(!is.na(data$X26013.1.0),data$X26013.1.0,
+                                 ifelse(!is.na(data$X26013.2.0),data$X26013.2.0,
+                                        ifelse(!is.na(data$X26013.3.0),data$X26013.3.0,data$X26013.4.0))))
+
+####26011	Total sugars
+data$TotalSugars<-ifelse(!is.na(data$X26011.0.0),data$X26011.0.0,
+                         ifelse(!is.na(data$X26011.1.0),data$X26011.1.0,
+                                ifelse(!is.na(data$X26011.2.0),data$X26011.2.0,
+                                       ifelse(!is.na(data$X26011.3.0),data$X26011.3.0,data$X26011.4.0))))
+
+####26017	Englyst fibre
+data$Fibre<-ifelse(!is.na(data$X26017.0.0),data$X26017.0.0,
+                   ifelse(!is.na(data$X26017.1.0),data$X26017.1.0,
+                          ifelse(!is.na(data$X26017.2.0),data$X26017.2.0,
+                                 ifelse(!is.na(data$X26017.3.0),data$X26017.3.0,data$X26017.4.0))))
+
+####26030	Alcohol
+data$TotAlcohol<-ifelse(!is.na(data$X26030.0.0),data$X26030.0.0,
+                        ifelse(!is.na(data$X26030.1.0),data$X26030.1.0,
+                               ifelse(!is.na(data$X26030.2.0),data$X26030.2.0,
+                                      ifelse(!is.na(data$X26030.3.0),data$X26030.3.0,data$X26030.4.0))))
+
+####26023	Vitamin C
+data$VitaminC<-ifelse(!is.na(data$X26023.0.0),data$X26023.0.0,
+                      ifelse(!is.na(data$X26023.1.0),data$X26023.1.0,
+                             ifelse(!is.na(data$X26023.2.0),data$X26023.2.0,
+                                    ifelse(!is.na(data$X26023.3.0),data$X26023.3.0,data$X26023.4.0))))
+
+####26028	Vitamin E
+data$VitaminE<-ifelse(!is.na(data$X26028.0.0),data$X26028.0.0,
+                      ifelse(!is.na(data$X26028.1.0),data$X26028.1.0,
+                             ifelse(!is.na(data$X26028.2.0),data$X26028.2.0,
+                                    ifelse(!is.na(data$X26028.3.0),data$X26028.3.0,data$X26028.4.0))))
+
+####26021	Vitamin B12
+data$VitaminB12<-ifelse(!is.na(data$X26021.0.0),data$X26021.0.0,
+                        ifelse(!is.na(data$X26021.1.0),data$X26021.1.0,
+                               ifelse(!is.na(data$X26021.2.0),data$X26021.2.0,
+                                      ifelse(!is.na(data$X26021.3.0),data$X26021.3.0,data$X26021.4.0))))
+
+####26022	Folate
+data$Folate<-ifelse(!is.na(data$X26022.0.0),data$X26022.0.0,
+                    ifelse(!is.na(data$X26022.1.0),data$X26022.1.0,
+                           ifelse(!is.na(data$X26022.2.0),data$X26022.2.0,
+                                  ifelse(!is.na(data$X26022.3.0),data$X26022.3.0,data$X26022.4.0))))
+
+####26039	Beta-carotene
+data$Betacarotene<-ifelse(!is.na(data$X26039.0.0),data$X26039.0.0,
+                          ifelse(!is.na(data$X26039.1.0),data$X26039.1.0,
+                                 ifelse(!is.na(data$X26039.2.0),data$X26039.2.0,
+                                        ifelse(!is.na(data$X26039.3.0),data$X26039.3.0,data$X26039.4.0))))
+
+####26019	Iron
+data$Iron<-ifelse(!is.na(data$X26019.0.0),data$X26019.0.0,
+                  ifelse(!is.na(data$X26019.1.0),data$X26019.1.0,
+                         ifelse(!is.na(data$X26019.2.0),data$X26019.2.0,
+                                ifelse(!is.na(data$X26019.3.0),data$X26019.3.0,data$X26019.4.0))))
+
+####26033	Zinc
+data$Zinc<-ifelse(!is.na(data$X26033.0.0),data$X26033.0.0,
+                  ifelse(!is.na(data$X26033.1.0),data$X26033.1.0,
+                         ifelse(!is.na(data$X26033.2.0),data$X26033.2.0,
+                                ifelse(!is.na(data$X26033.3.0),data$X26033.3.0,data$X26033.4.0))))
+
+####26047	Iodine
+data$Iodine<-ifelse(!is.na(data$X26047.0.0),data$X26047.0.0,
+                    ifelse(!is.na(data$X26047.1.0),data$X26047.1.0,
+                           ifelse(!is.na(data$X26047.2.0),data$X26047.2.0,
+                                  ifelse(!is.na(data$X26047.3.0),data$X26047.3.0,data$X26047.4.0))))
+
+####26052	Sodium
+data$Sodium<-ifelse(!is.na(data$X26052.0.0),data$X26052.0.0,
+                    ifelse(!is.na(data$X26052.1.0),data$X26052.1.0,
+                           ifelse(!is.na(data$X26052.2.0),data$X26052.2.0,
+                                  ifelse(!is.na(data$X26052.3.0),data$X26052.3.0,data$X26052.4.0))))
+
+####26025	Magnesium
+data$Magnesium<-ifelse(!is.na(data$X26025.0.0),data$X26025.0.0,
+                       ifelse(!is.na(data$X26025.1.0),data$X26025.1.0,
+                              ifelse(!is.na(data$X26025.2.0),data$X26025.2.0,
+                                     ifelse(!is.na(data$X26025.3.0),data$X26025.3.0,data$X26025.4.0))))
+
+####26024	Potassium
+data$Potassium<-ifelse(!is.na(data$X26024.0.0),data$X26024.0.0,
+                       ifelse(!is.na(data$X26024.1.0),data$X26024.1.0,
+                              ifelse(!is.na(data$X26024.2.0),data$X26024.2.0,
+                                     ifelse(!is.na(data$X26024.3.0),data$X26024.3.0,data$X26024.4.0))))
+
+
+####34	Year of birth
+colnames(data)[which(colnames(data)=="X34.0.0")]<-"YearBirth"
+data$YearBirth<-as.Date(data$YearBirth)
+
+#Age recruitment
+data$age_recruit<-as.numeric(format(data$DateRecruit,format="%Y"))-as.numeric(data$YearBirth)
+
+####48 Waist circumference
+colnames(data)[which(colnames(data)=="X48.0.0")]<-"Waist"
+
+####21002 Weight
+colnames(data)[which(colnames(data)=="X21002.0.0")]<-"Weight"
+
+####30710	C-reactive protein
+colnames(data)[which(colnames(data)=="X30710.0.0")]<-"creactiveprotein"
+
+####30890	Vitamin D
+colnames(data)[which(colnames(data)=="X30890.0.0")]<-"vitamind"
+
+
+
+#***************************************************
+#* 1 physical activity (IPAQ)                      *
+#***************************************************
+#n_864_0_0 --> numero di giorni/settimane lieve attivit? fisica (camminata) + 10minuti
+#n_884_0_0 --> numero di giorni/settimane moderata attivit? fisica + 10minuti
+#n_904_0_0 --> numero di giorni/settimane vigorosa attivit? fisica + 10minuti
+
+
+#/*exclude those whose data was unsable in frequency question*/
+#/*yet include those who is unable to walk and set their walking METs to zero*/
+data<-mutate(data, X884.0.0 = ifelse(X884.0.0 %in% c(-3,-1),NA, X884.0.0)) 
+data<-mutate(data, X904.0.0 = ifelse(X904.0.0 %in% c(-3,-1),NA, X904.0.0))
+data<-mutate(data, X884.0.0 = ifelse(X864.0.0==-2,0,X884.0.0))  
+data<-mutate(data, X904.0.0 = ifelse(X864.0.0==-2,0,X904.0.0))  
+data<-mutate(data, X864.0.0 = ifelse(X864.0.0 %in% c(-3,-1),NA,
+                                     ifelse(X864.0.0 %in% c(-2), 0, X864.0.0))) 
+
+
+#/*set unuasble duration to zero*/
+# /*recoding according to IPAQ*/
+data<-mutate(data, X874.0.0 = ifelse(X874.0.0 %in% c(-3,-1, NA),NA,X874.0.0))  
+data<-mutate(data, X894.0.0 = ifelse(X894.0.0 %in% c(-3,-1, NA),NA,X894.0.0))
+data<-mutate(data, X914.0.0 = ifelse(X914.0.0 %in% c(-3,-1, NA),NA,X914.0.0)) 
+
+data<-mutate(data, X874.0.0 = ifelse(X864.0.0==0,0,X874.0.0))  
+data<-mutate(data, X894.0.0 = ifelse(X884.0.0==0,0,X894.0.0))  
+data<-mutate(data, X914.0.0 = ifelse(X904.0.0==0,0,X914.0.0))  
+
+
+#Metto missing quando la somma delle tre variabili ? pi? di 960 --> ESCLUDO OUTLIERS
+data<-mutate(data, X874.0.0 = ifelse((X874.0.0+X894.0.0+X914.0.0)>960,NA,X874.0.0))  
+data<-mutate(data, X894.0.0 = ifelse((X874.0.0+X894.0.0+X914.0.0)>960,NA,X894.0.0))
+data<-mutate(data, X914.0.0 = ifelse((X874.0.0+X894.0.0+X914.0.0)>960,NA,X914.0.0)) 
+
+#Tutti quelli con >180 li metto a 180 --> Truncation of data Rules
+data<-mutate(data, X874.0.0 = ifelse(X894.0.0>180,180,X874.0.0))
+data<-mutate(data, X894.0.0 = ifelse(X894.0.0>180,180,X894.0.0))
+data<-mutate(data, X914.0.0 = ifelse(X914.0.0>180,180,X914.0.0)) 
+
+
+
+#Minimum Values for Duration of Activity
+#Only values of 10 or more minutes of activity should be included in the calculation of
+#summary scores. The rationale being that the scientific evidence indicates that
+#episodes or bouts of at least 10 minutes are required to achieve health benefits.
+#Responses of less than 10 minutes [and their associated days] should be re-coded to
+#'zero'. 
+
+data<-mutate(data, X864.0.0 = ifelse(X874.0.0<10,0,X864.0.0))
+data<-mutate(data, X884.0.0 = ifelse(X894.0.0<10,0,X884.0.0)) 
+data<-mutate(data, X904.0.0 = ifelse(X914.0.0<10,0,X904.0.0)) 
+
+data<-mutate(data, X874.0.0 = ifelse(X874.0.0<10,0,X874.0.0))
+data<-mutate(data, X894.0.0 = ifelse(X894.0.0<10,0,X894.0.0)) 
+data<-mutate(data, X914.0.0 = ifelse(X914.0.0<10,0,X914.0.0)) 
+
+data<-mutate(data, X874.0.0 = ifelse(X864.0.0==0,0,X874.0.0))  
+data<-mutate(data, X894.0.0 = ifelse(X884.0.0==0,0,X894.0.0))  
+data<-mutate(data, X914.0.0 = ifelse(X904.0.0==0,0,X914.0.0))  
+
+###Creo il pa score
+#Category "light"
+#Per esclusione delle altre
+
+#Category 'moderate' 
+#3 or more days of vigorous-intensity activity of at least 20 minutes per day
+#OR
+#5 or more days of moderate-intensity activity and/or walking of at least 30
+#minutes per day OR
+#5 or more days of any combination of walking, moderate-intensity or vigorous
+#intensity activities achieving a minimum dataal physical activity of at least 600
+#MET-minutes/week.
+
+#Category 3 High
+# a) vigorous-intensity activity on at least 3 days achieving a minimum dataal
+#physical activity of at least 1500 MET-minutes/week 
+#OR
+#7 or more days of any combination of walking, moderate-intensity or
+#vigorous-intensity activities achieving a minimum dataal physical activity
+#of at least 3000 MET-minutes/week. 
+
+#Walking MET-minutes/week = 3.3 * walking minutes * walking days
+#Moderate MET-minutes/week = 4.0 * moderate-intensity activity minutes * moderate days
+#Vigorous MET-minutes/week = 8.0 * vigorous-intensity activity minutes * vigorous-intensity days
+#dataal physical activity MET-minutes/week = sum of Walking + Moderate + Vigorous METminutes/week scores. 
+
+data$Walking_MET=3.3*data$X874.0.0*data$X864.0.0
+data$moderate_MET=4*data$X894.0.0*data$X884.0.0
+data$vig_MET=8*data$X904.0.0*data$X914.0.0
+data$dataal=data$Walking_MET+data$moderate_MET+data$vig_MET
+summary(data$dataal)
+
+
+data<-mutate(data, pa_score = ifelse(X904.0.0>=3 & dataal>=1500 |
+                                       (X864.0.0+X884.0.0+X904.0.0)>=7 & dataal>=3000,2,
+                                     ifelse(X904.0.0>=3 & X914.0.0>=20 |
+                                              X884.0.0>=5 | X874.0.0>=30 |X894.0.0>=30 |
+                                              (X864.0.0+X884.0.0+X904.0.0)>=5 & dataal>=600,1,0)))
+
+table(data$pa_score, useNA = "always")
+
+#***************************************************
+#* 2 sitting                                       *
+#***************************************************
+#1070 --> tempo a guardare la tv
+#1080 --> tempo al pc
+#1090 --> tempo alla guida
+
+data<-mutate(data,X1070.0.0 = ifelse(X1070.0.0 %in% c(-3,-1, NA),NA,
+                                     ifelse(X1070.0.0==-10,0.5,X1070.0.0))) 
+data<-mutate(data,X1080.0.0 = ifelse(X1080.0.0 %in% c(-3,-1, NA),NA,
+                                     ifelse(X1080.0.0==-10,0.5,X1080.0.0))) 
+data<-mutate(data,X1090.0.0 = ifelse(X1090.0.0 %in% c(-3,-1, NA),NA,
+                                     ifelse(X1090.0.0==-10,0.5,X1090.0.0))) 
+
+data$sit_nmiss<-0
+data$sit_nmiss<-ifelse(is.na(data$X1070.0.0),data$sit_nmiss+1,data$sit_nmiss )
+data$sit_nmiss<-ifelse(is.na(data$X1080.0.0),data$sit_nmiss+1,data$sit_nmiss )
+data$sit_nmiss<-ifelse(is.na(data$X1090.0.0),data$sit_nmiss+1,data$sit_nmiss )
+
+table(data$X1070.0.0, useNA = "always")
+table(data$X1080.0.0, useNA = "always")
+table(data$X1090.0.0, useNA = "always")
+
+data$sitting=data$X1070.0.0+data$X1080.0.0+data$X1090.0.0
+
+data<-mutate(data, sitting = ifelse(data$sit_nmiss>0,NA,sitting))
+
+
+
+#***************************************************
+#* 3 sleep                                         *
+#***************************************************
+#1160 --> durata sonno
+#1180 --> cronotipo (gufo etc)
+#1200 --> insomnia
+#1210 --> russare
+#1220 --> narcolessia
+
+data$X1180.0.0=ifelse(data$X1180.0.0==-3|data$X1180.0.0==-1, NA, data$X1180.0.0)
+data$X1160.0.0=ifelse(data$X1160.0.0==-3|data$X1160.0.0==-1, NA, data$X1160.0.0)
+data$X1200.0.0=ifelse(data$X1200.0.0==-3|data$X1200.0.0==-1, NA, data$X1200.0.0)
+data$X1210.0.0=ifelse(data$X1210.0.0==-3|data$X1210.0.0==-1, NA, data$X1210.0.0)
+data$X1220.0.0=ifelse(data$X1220.0.0==-3|data$X1220.0.0==-1, NA, data$X1220.0.0)
+
+data$slp_nmiss<-0
+data$slp_nmiss<-ifelse(is.na(data$X1160.0.0),data$slp_nmiss+1,data$slp_nmiss )
+data$slp_nmiss<-ifelse(is.na(data$X1180.0.0),data$slp_nmiss+1,data$slp_nmiss )
+data$slp_nmiss<-ifelse(is.na(data$X1200.0.0),data$slp_nmiss+1,data$slp_nmiss )
+data$slp_nmiss<-ifelse(is.na(data$X1210.0.0),data$slp_nmiss+1,data$slp_nmiss )
+data$slp_nmiss<-ifelse(is.na(data$X1220.0.0),data$slp_nmiss+1,data$slp_nmiss )
+
+
+data$slp_score_pre<-0
+data$slp_score_pre<-ifelse(data$X1180.0.0==1 | data$X1180.0.0==2  ,data$slp_score_pre+1,data$slp_score_pre)
+data$slp_score_pre<-ifelse(data$X1160.0.0>=7 & data$X1160.0.0<9   ,data$slp_score_pre+1,data$slp_score_pre) 
+data$slp_score_pre<-ifelse(data$X1200.0.0==1 | data$X1200.0.0==2  ,data$slp_score_pre+1,data$slp_score_pre)
+data$slp_score_pre<-ifelse(data$X1210.0.0==2 , data$slp_score_pre+1,data$slp_score_pre)
+data$slp_score_pre<-ifelse(data$X1220.0.0==0 | data$X1220.0.0==1  ,data$slp_score_pre+1,data$slp_score_pre)
+data$slp_score_pre<-ifelse(data$slp_nmiss>0,NA,data$slp_score_pre)
+
+data$slp_score<-data$slp_score_pre
+
+
+#***************************************************;
+#* 6 smoking
+#***************************************************;
+
+#-3 Prefer not to answer
+#0 Never
+#1 Previous
+#2 Current
+
+data$smoke_score<-ifelse(is.na(data$X20116.0.0) | data$X20116.0.0==-3,NA, 
+                         ifelse(data$X20116.0.0==0,2, 
+                                ifelse(data$X20116.0.0==1,1,0)))
+
+
+##################################OUTCOMES###########################à
+# Death date
+data$X40000.0.0=as.Date(data$X40000.0.0, format= "%Y-%m-%d")
+data$X40000.1.0=as.Date(data$X40000.1.0, format= "%Y-%m-%d")
+
+data$Death<-0
+data$Date_death<-NA
+data$Date_death<-as.Date(data$Date_death)
+
+#Death indicator
+for (i in 12024:12025){
+  data$Death<-ifelse(data$Death==0 & (!is.na(data[,i]) & data[,i]!=""), 1, data$Death)}
+
+
+#Death date
+data$Date_death<-as.Date(ifelse(data$Death==1 & !is.na(data$X40000.0.0), data$X40000.0.0, 
+                                ifelse(data$Death==1 & is.na(data$X40000.0.0) & !is.na(data$X40000.0.1), data$X40000.0.1, data$Date_death)))
+
+
+# End follow-up
+data$fup_end<-as.Date("2021/12/31")
+
+# Date lost follow-up
+data$Date_lost_fup<-as.Date(data$X191.0.0)
+
+#CVD outcomes incidence date and mortality date
+
+###########EHR diagnoses
+library(dplyr)
+#You have to download files as explained in https://github.com/philipdarke/ukbb-ehr-data
+#EHR diagnoses are in this file
+diagnoses <- readRDS(paste0(getwd(), "/diagnoses.rds"))
+
+diagnoses2<-diagnoses
+diagnoses2<-diagnoses2 %>%
+  group_by(eid, variable) %>%
+  arrange(eid) %>%
+  filter(row_number()==1)
+
+#Example for Hypertension diagnosis
+hypertension<-diagnoses2[which(diagnoses2$variable=="hypertension"),]
+data$HypertensionDateEHR<-NA
+data$HypertensionDateEHR<-as.Date(data$HypertensionDateEHR)
+data$HypertensionDateEHR[which(data$eid %in% hypertension$eid[which(hypertension$source=="ehr")])]<-hypertension$date[which(hypertension$source=="ehr")]
+
+
+###########UKBB OUTCOMES
+#131296	Date I20 first reported (angina pectoris)
+data$AnginaDate<-as.Date(data$X131296.0.0)
+#131297	Source of report of I20 (angina pectoris)
+data$AnginaSource<-data$X131297.0.0
+data$AnginaDateDeath<-NA
+data$AnginaDateDeath<-as.Date(data$AnginaDateDeath)
+data$AnginaDateDeath[which(data$AnginaSource%in%c(20,21))]<-as.Date(data$X131296.0.0[which(data$AnginaSource%in%c(20,21))])
+
+#131298	Date I21 first reported (acute myocardial infarction)
+data$AcuMIDate<-as.Date(data$X131298.0.0)
+#131299	Source of report of I21 (acute myocardial infarction)
+data$AcuMISource<-data$X131299.0.0
+data$AcuMIDateDeath<-NA
+data$AcuMIDateDeath<-as.Date(data$AcuMIDateDeath)
+data$AcuMIDateDeath[which(data$AcuMISource%in%c(20,21))]<-as.Date(data$X131298.0.0[which(data$AcuMISource%in%c(20,21))])
+
+#131300	Date I22 first reported (subsequent myocardial infarction)
+data$SubMIDate<-as.Date(data$X131300.0.0)
+#131301	Source of report of I22 (subsequent myocardial infarction)
+data$SubMISource<-data$X131301.0.0
+data$SubMIDateDeath<-NA
+data$SubMIDateDeath<-as.Date(data$SubMIDateDeath)
+data$SubMIDateDeath[which(data$SubMISource%in%c(20,21))]<-as.Date(data$X131300.0.0[which(data$SubMISource%in%c(20,21))])
+
+#131302	Date I23 first reported (certain current complications following acute myocardial infarction)
+data$ComplMIDate<-as.Date(data$X131302.0.0)
+#131303	Source of report of I23 (certain current complications following acute myocardial infarction)
+data$ComplMISource<-data$X131303.0.0
+data$ComplMIDateDeath<-NA
+data$ComplMIDateDeath<-as.Date(data$ComplMIDateDeath)
+data$ComplMIDateDeath[which(data$ComplMISource%in%c(20,21))]<-as.Date(data$X131302.0.0[which(data$ComplMISource%in%c(20,21))])
+
+#131304	Date I24 first reported (other acute ischaemic heart diseases)
+data$OtherIHDDate<-as.Date(data$X131304.0.0)
+#131305	Source of report of I24 (other acute ischaemic heart diseases)
+data$OtherIHDSource<-data$X131305.0.0
+data$OtherIHDDateDeath<-NA
+data$OtherIHDDateDeath<-as.Date(data$OtherIHDDateDeath)
+data$OtherIHDDateDeath[which(data$OtherIHDSource%in%c(20,21))]<-as.Date(data$X131304.0.0[which(data$OtherIHDSource%in%c(20,21))])
+
+#131306	Date I25 first reported (chronic ischaemic heart disease)
+data$ChronicIHDDate<-as.Date(data$X131306.0.0)
+#131307	Source of report of I25 (chronic ischaemic heart disease)
+data$ChronicIHDSource<-data$X131307.0.0
+data$ChronicIHDDateDeath<-NA
+data$ChronicIHDDateDeath<-as.Date(data$ChronicIHDDateDeath)
+data$ChronicIHDDateDeath[which(data$ChronicIHDSource%in%c(20,21))]<-as.Date(data$X131306.0.0[which(data$ChronicIHDSource%in%c(20,21))])
+
+#131364	Date I62 first reported (other nontraumatic intracranial haemorrhage)
+data$Stroke1Date<-as.Date(data$X131364.0.0)
+#131365	Source of report of I62 (other nontraumatic intracranial haemorrhage)
+data$Stroke1Source<-data$X131365.0.0
+data$Stroke1DateDeath<-NA
+data$Stroke1DateDeath<-as.Date(data$Stroke1DateDeath)
+data$Stroke1DateDeath[which(data$Stroke1Source%in%c(20,21))]<-as.Date(data$X131364.0.0[which(data$Stroke1Source%in%c(20,21))])
+
+#131362	Date I61 first reported (intracerebral haemorrhage)
+data$Stroke2Date<-as.Date(data$X131362.0.0)
+#131363	Source of report of I61 (intracerebral haemorrhage)
+data$Stroke2Source<-data$X131363.0.0
+data$Stroke2DateDeath<-NA
+data$Stroke2DateDeath<-as.Date(data$Stroke2DateDeath)
+data$Stroke2DateDeath[which(data$Stroke2Source%in%c(20,21))]<-as.Date(data$X131362.0.0[which(data$Stroke2Source%in%c(20,21))])
+
+#131366	Date I63 first reported (cerebral infarction)
+data$Stroke3Date<-as.Date(data$X131366.0.0)
+#131367	Source of report of I63 (cerebral infarction)
+data$Stroke3Source<-data$X131367.0.0
+data$Stroke3DateDeath<-NA
+data$Stroke3DateDeath<-as.Date(data$Stroke3DateDeath)
+data$Stroke3DateDeath[which(data$Stroke3Source%in%c(20,21))]<-as.Date(data$X131366.0.0[which(data$Stroke3Source%in%c(20,21))])
+
+#131368	Date I64 first reported (stroke, not specified as haemorrhage or infarction)
+data$Stroke4Date<-as.Date(data$X131368.0.0)
+#131369	Source of report of I64 (stroke, not specified as haemorrhage or infarction)
+data$Stroke4Source<-data$X131369.0.0
+data$Stroke4DateDeath<-NA
+data$Stroke4DateDeath<-as.Date(data$Stroke4DateDeath)
+data$Stroke4DateDeath[which(data$Stroke4Source%in%c(20,21))]<-as.Date(data$X131368.0.0[which(data$Stroke4Source%in%c(20,21))])
+
+#131354	Date I50 first reported (heart failure)
+data$HFDate<-as.Date(data$X131354.0.0)
+#131355	Source of report of I50 (heart failure)
+data$HFSource<-data$X131355.0.0
+data$HFDateDeath<-NA
+data$HFDateDeath<-as.Date(data$HFDateDeath)
+data$HFDateDeath[which(data$HFSource%in%c(20,21))]<-as.Date(data$X131354.0.0[which(data$HFSource%in%c(20,21))])
+
+#131350	Date I48 first reported (atrial fibrillation and flutter)
+data$AF2Date<-as.Date(data$X131350.0.0)
+#131351	Source of report of I48 (atrial fibrillation and flutter)
+data$AF2Source<-data$X131351.0.0
+data$AF2DateDeath<-NA
+data$AF2DateDeath<-as.Date(data$AF2DateDeath)
+data$AF2DateDeath[which(data$AF2Source%in%c(20,21))]<-as.Date(data$X131350.0.0[which(data$AF2Source%in%c(20,21))])
+
+#Cardiometabolic outcomes
+#130792	Date E66 first reported (obesity)
+data$ObesityDate<-as.Date(data$X130792.0.0)
+#130793	Source of report of E66 (obesity)
+data$ObesitySource<-data$X130793.0.0
+
+#131286	Date I10 first reported (essential (primary) hypertension)
+data$HypertensionDate<-as.Date(data$X131286.0.0)
+#131287	Source of report of I10 (essential (primary) hypertension)
+data$HypertensionSource<-data$X131287.0.0
+
+#130708	Date E11 first reported (non-insulin-dependent diabetes mellitus)
+data$DiabDate<-as.Date(data$X130708.0.0)
+#130709	Source of report of E11 (non-insulin-dependent diabetes mellitus)
+data$DiabSource<-data$X130709.0.0
+
+#Hypergycaemia diagnosis
+data$Hyperglycaemia<-0
+data$Date_Hyperglycaemia<-NA
+data$Date_Hyperglycaemia<-as.Date(data$Date_Hyperglycaemia)
+for (i in 13204:13446){
+  data$Hyperglycaemia<-ifelse(data$Hyperglycaemia==0 & data[,i] %in% c("R739"),1,data$Hyperglycaemia)
+  data$Date_Hyperglycaemia<-ifelse(is.na(data$Date_Hyperglycaemia) & data[,i] %in% c("R739"),data[,i+450],data$Date_Hyperglycaemia)
+}
+data$Date_Hyperglycaemia<-as.Date(data$Date_Hyperglycaemia)
+
+#Hyperlipidaemia diagnosis
+data$Hyperlipidaemia<-0
+data$Date_Hyperlipidaemia<-NA
+data$Date_Hyperlipidaemia<-as.Date(data$Date_Hyperlipidaemia)
+for (i in 13204:13446){
+  data$Hyperlipidaemia<-ifelse(data$Hyperlipidaemia==0 & data[,i] %in% c("E785"),1,data$Hyperlipidaemia)
+  data$Date_Hyperlipidaemia<-ifelse(is.na(data$Date_Hyperlipidaemia) & data[,i] %in% c("E785"),data[,i+450],data$Date_Hyperlipidaemia)
+}
+data$Date_Hyperlipidaemia<-as.Date(data$Date_Hyperlipidaemia)
+
+#Cancer diagnosis
+data$Cancer_1<-0
+data$Cancer_1_date_1<-NA
+data$Cancer_1_date_1<-as.Date(data$Cancer_1_date_1)
+for (i in 13204:13446){
+  data$Cancer_1<-ifelse(data$Cancer_1==0 & (startsWith(as.character(data[,i]),  c("C")) |
+                                              startsWith(as.character(data[,i]),  c("D0"))) & data[,i]!="C449", 1,data$Cancer_1)
+  data$Cancer_1_date_1<-as.Date(ifelse(is.na(data$Cancer_1_date_1) & (startsWith(as.character(data[,i]),  c("C")) |
+                                                                        startsWith(as.character(data[,i]),  c("D0"))) & data[,i]!="C449",data[,450+i],data$Cancer_1_date_1))
+}
+
+
+####TIME TO EVENT##########
+colnames(data)[which(colnames(data)=="X53.0.0")]<-"DateRecruit"
+data$DateRecruit<-as.Date(data$DateRecruit)
+
+#Example for Hypertension
+data$Hypertension_date<-NA
+data$Hypertension_date<-as.Date(data$Hypertension_date)
+data$Hypertension_date <- do.call(pmin, c(data[,c("HypertensionDate","HypertensionDateEHR")], na.rm = TRUE))
+
+# Censor at death or lost of follow-up
+data$data_studioHypertension<-NA
+data$data_studioHypertension<-as.Date(data$data_studioHypertension)
+data$data_studioHypertension=as.Date(ifelse(data$Hypertension==1, data$Hypertension_date,
+                                       ifelse(data$Hypertension==0 & (data$Death==1), data$Date_death,
+                                              ifelse(data$Hypertension==0 & !is.na(data$Date_lost_fup), 
+                                                     data$Date_lost_fup, data$fup_end))))
+
+# person-years
+data$anni_studioHypertension=time_length(difftime(data$data_studioHypertension,data$DateRecruit),"years")
